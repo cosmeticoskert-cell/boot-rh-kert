@@ -24,16 +24,17 @@ const VERIFY_TOKEN = "cher3374";
   Útil para criar pequenos delays entre mensagens.*/
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// ================== Função de envio de texto via WhatsApp ==================
 /*Função que envia mensagem de texto via WhatsApp Cloud API.*/
 async function sendText(to, text) {
   const url = `https://graph.facebook.com/v17.0/${process.env.PHONE_NUMBER_ID}/messages`;
   const body = {
     messaging_product: "whatsapp",
-    to,//numero do destinatério
-    type: "text", //tipo do dado
-    text: { body: text }, //conteúdo da mensagem
+    to, // número do destinatário
+    type: "text", // tipo da mensagem
+    text: { body: text }, // conteúdo da mensagem
   };
-  const headers = { //inclui o token do whatsApp
+  const headers = { // inclui o token do WhatsApp
     Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
     "Content-Type": "application/json",
   };
@@ -43,6 +44,23 @@ async function sendText(to, text) {
     console.error("Erro ao enviar:", e?.response?.data || e.message);
   }
 }
+
+// ================== Rota de teste de envio de mensagem ==================
+app.get("/test-message", async (req, res) => {
+  const TEST_NUMBER = "5511959522699"; // coloque aqui o número autorizado na Meta
+
+  try {
+    console.log("Enviando mensagem de teste para:", TEST_NUMBER);
+    await sendText(TEST_NUMBER, "🔔 Mensagem de teste enviada com sucesso pelo Bot RH Kert!");
+    return res.status(200).send("Mensagem de teste enviada!");
+  } catch (e) {
+    console.error("Erro ao enviar mensagem de teste:", e?.response?.data || e.message);
+    return res.status(500).send("Erro ao enviar mensagem de teste.");
+  }
+});
+
+
+
 
 //------------------------------------------------------------------------------------LISTA DE MENUS PRINCIPAIS---------------------------------------------------------------------------------------
 
@@ -461,6 +479,7 @@ app.get("/webhook", (req, res) => {
   }
   return res.sendStatus(403);// Se algo estiver errado → retorna 403 Forbidden.
 });
+
 
 //Toda mensagem enviada por um usuário no WhatsApp é enviada pelo Meta ao seu servidor via POST.
 app.post("/webhook", async (req, res) => {
