@@ -43,6 +43,22 @@ async function sendText(to, text) {
     console.error("Erro ao enviar:", e?.response?.data || e.message);
   }
 }
+//Envio de mensagem teste
+app.get("/test-message", async (req, res) => {
+  const TEST_NUMBER = "5511959522699"; // coloque aqui o número autorizado
+
+  try {
+    console.log("Enviando mensagem de teste para:", TEST_NUMBER);
+
+    await sendText(TEST_NUMBER, "🚀 Teste OK! Seu bot está enviando mensagens.");
+
+    return res.send("Mensagem de teste enviada com sucesso!");
+  } catch (error) {
+    console.error("Erro no envio de teste:", error?.response?.data || error);
+    return res.status(500).send("Erro ao enviar a mensagem de teste.");
+  }
+});
+
 
 //------------------------------------------------------------------------------------LISTA DE MENUS PRINCIPAIS---------------------------------------------------------------------------------------
 
