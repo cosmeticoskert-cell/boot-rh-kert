@@ -43,6 +43,10 @@ async function sendText(to, text) {
     console.error("Erro ao enviar:", e?.response?.data || e.message);
   }
 }
+app.get("/", (req, res) => {
+  res.send("Versão com /test-message carregada ✅");
+});
+
 
 //------------------------------------------------------------------------------------LISTA DE MENUS PRINCIPAIS---------------------------------------------------------------------------------------
 
