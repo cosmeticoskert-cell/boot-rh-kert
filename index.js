@@ -1,47 +1,112 @@
-
-//carregamento do .env
+//-------------------------------------------------------------------------------------------------Carregamento do .env (variáveis como: email, senhas, tokens)-------------------------------
 require("dotenv").config(); 
 
-/*Importando as bibliotecas*/
-const express = require("express"); //cria o servidor HTTP (endpoints do webhook).
-const axios = require("axios"); //faz requisições HTTP (usado para chamar a API do WhatsApp).
-const nodemailer = require("nodemailer"); //biblioteca para envio de e-mails via SMTP.*/
-
-/*Inicializa o app Express.*/ 
-const app = express(); //habilita o parsing de JSON no corpo das requisições (para receber os eventos do WhatsApp).
+//-------------------------------------------------------------------------------------------------Importando as bibliotecas------------------------------------------------------------------
+//cria o servidor que permite "falar com o BOT"
+const express = require("express"); 
+//é o mensageiro usado para "chamar/ligar" a API do WhatsApp na Meta).
+const axios = require("axios"); 
+//biblioteca para envio de e-mails via SMTP, usado quando alguem entra na fila.
+const nodemailer = require("nodemailer"); 
+//-------------------------------------------------------------------------------------------------Inicializa o app Express.-----------------------------------------------------------------
+const app = express(); //Cria um servidor e aceita mensagens em formato JSON.
 app.use(express.json());
 
-/*Logs de diagnóstico para conferir se as variáveis chegaram.
-  Mostra o SMTP_USER completo (ok se o terminal é privado) e, para a senha, apenas o tamanho (boa prática para não vazar o segredo).
-  O trim() remove espaços invisíveis que, às vezes, vêm de colar a senha/token com espaço no fim/começo.*/
+//-------------------------------------------------------------------------------------------------Logs de diagnóstico para conferir se as variáveis chegaram.-------------------------------
+ /* 1ºMostra qual e-mail está sendo usado pra enviar
+    2ºconfirma se a senha existe (sem mostrar a senha)
+    3ºremove espaços invisíveis
+    4ºevita erro besta tipo: “senha errada” (quando na verdade era um espaço)
+  */
 console.log("SMTP_USER:", (process.env.SMTP_USER||"").trim());
 console.log("SMTP_PASS len:", (process.env.SMTP_PASS||"").trim().length);
 
-const PORT = process.env.PORT || 3000;
-const VERIFY_TOKEN = "cher3374";
+//-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+const PORT = process.env.PORT || 3000; //porta onde o servidor está rodando
+const VERIFY_TOKEN = "cher3374"; // token de validação na Meta
 
-/*coloca o Bt para “dormir” por ms milissegundos.
-  Útil para criar pequenos delays entre mensagens.*/
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+//-------------------------------------------------------------------------------------------------Delay para deixar o Bot mais "Humano"----------------------------------------------------
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));//Coloca o Bt para “dormir” por ms milissegundos.
 
-/*Função que envia mensagem de texto via WhatsApp Cloud API.*/
+//-------------------------------------------------------------------------------------------------Envio da mensagem de texto bot via WhatsApp Cloud API---------------------------------------
+/*
+1ºMonta o endereço da Meta
+2ºDiz pra quem mandar
+3ºDiz o que mandar
+4ºUsa o token secreto
+5ºEnvia
+*/
 async function sendText(to, text) {
-  const url = `https://graph.facebook.com/v17.0/${process.env.PHONE_NUMBER_ID}/messages`;
+  const url = `https://graph.facebook.com/v17.0/${process.env.PHONE_NUMBER_ID}/messages`;//endereço oficial para mandar mensagem
   const body = {
     messaging_product: "whatsapp",
     to,//numero do destinatério
     type: "text", //tipo do dado
     text: { body: text }, //conteúdo da mensagem
   };
-  const headers = { //inclui o token do whatsApp
+  const headers = { //é a identidade do bot, inclui o token do whatsApp para autorizar na meta
     Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
     "Content-Type": "application/json",
   };
-  try {
+  try {// tratamento de erro caso a mensagem falhe
     await axios.post(url, body, { headers });
+    try { logMessage(to, "bot", text); } catch (e) {}
   } catch (e) {
     console.error("Erro ao enviar:", e?.response?.data || e.message);
   }
+}
+
+//-------------------------------------------------------------------------------------------------Envio da mensagem de texto humano via WhatsApp Cloud API(painel /admin)-------------
+/*
+1ºMonta o endereço da Meta
+2ºDiz pra quem mandar
+3ºDiz o que mandar
+4ºUsa o token secreto
+5ºEnvia
+*/
+
+async function sendHumanText(to, text) {
+  const url = `https://graph.facebook.com/v22.0/${process.env.PHONE_NUMBER_ID}/messages`;//endereço oficial para mandar mensagem
+  const body = {
+     messaging_product: "whatsapp",
+    to,//numero do destinatério
+    type: "text", //tipo do dado
+    text: { body: text }, //conteúdo da mensagem
+  };
+  const headers = { //é a identidade do bot, inclui o token do whatsApp para autorizar na meta
+    Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+    "Content-Type": "application/json",
+  };
+  try {// tratamento de erro caso a mensagem falhe
+    await axios.post(url, body, { headers });
+    try { logMessage(to, "human", text); } catch (e) {}
+  } catch (e) {
+    console.error("Erro ao enviar (humano):", e?.response?.data || e.message);
+  }
+}
+
+
+//-------------------------------------------------------------------------------------------------iniciar conversa com alguém que ainda não falou com o bot---------------------------
+
+//Essa função serve para iniciar uma conversa com alguém que ainda não falou com o bot, ou que ficou mais de 24 horas sem responder.
+
+async function sendHelloWorldTemplate(to) {
+  const url = `https://graph.facebook.com/v22.0/${process.env.PHONE_NUMBER_ID}/messages`;//url da meta
+  const body = {//corpo da mensagem
+    messaging_product: "whatsapp",
+    to,
+    type: "template",//o tipo da mensagem é um template
+    template: {// mensagem modelo aprovada pela meta
+      name: "hello_world",
+      language: { code: "en_US" },
+    },
+  };
+  const headers = {//cabeçario da função, mesma identidade, mesmo token
+    Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+    "Content-Type": "application/json",
+  };
+  // retorna a resposta para o caller poder validar no endpoint de teste
+  return axios.post(url, body, { headers });
 }
 
 //------------------------------------------------------------------------------------LISTA DE MENUS PRINCIPAIS---------------------------------------------------------------------------------------
@@ -180,12 +245,15 @@ const THANKS = "Atendimento encerrado. Obrigado por entrar em contato com o RH K
 //Mensagem enviada quando o Bot está em estado hanover (inativo) e o usuário envia uma nova mensagem
 const ASK_HANDOVER = "Como posso te ajudar agora?\n\n1️⃣ Retornar ao Menu inicial\n\n2️⃣ Aguardar o atendimento humano";
 
-//------------------------------------------------------------------------------------ENVIO DO MENU PRINCIPAL E SUBMENU PONTO-------------------------------------------------------------------------
+//------------------------------------------------------------------------------------ENVIO DOS MENUS PRINCIPAL E SUBMENU PONTO-------------------------------------------------------------------------
 // Envia saudação + menu principal (com intervalo de 1s)
 async function sendWelcomeAndMenu(to) {
-  await sendText(to, WELCOME_1);//envia a mensagem pelo WhatsApp para "to", que é o número do destinatário
-  await wait(1000); //pausa por 1 segundo antes de mandar o menu, pra conversa parecer mais natural.
-  await sendText(to, ROOT_MENU); //envia a mensagem pelo WhatsApp.
+  //envia a mensagem pelo WhatsApp para "to", que é o número do destinatário
+  await sendText(to, WELCOME_1);
+  //pausa por 1 segundo antes de mandar o menu, pra conversa parecer mais natural.
+  await wait(1000); 
+  //envia a mensagem pelo WhatsApp.
+  await sendText(to, ROOT_MENU); 
 }
 
 // Envia o menu principal (sem saudação)
@@ -276,12 +344,73 @@ const PASSO_INCLUIR = [
 //------------------------------------------------------------------------------------ENVIO PARA ATENDIMENTO HUMANO ---------------------------------------------------------------------------------------
 
 //Mensagem de envio para atendente
-const PASSO_ATENDENTE = [
-  "🔄 Encaminhando para um atendente humano. Nosso time responderá em até 24 horas.",
-].join("\n"); //Está dentro de um array ([...]) e depois usa .join("\n") — isso é só um jeito de permitir várias linhas, mesmo que agora tenha só uma.
+function handoverMsg(_position){//posição do usuário na fila de chamados
 
-//Essa é a lógica que lembra em que ponto da conversa o usuário está.
-const state = new Map(); //Map() é uma estrutura tipo “dicionário”: chave → valor. O valor é o “estado” ou etapa do fluxo
+  // Função que devolve um texto pronto, mas sem informar ao usuário a posição dele na fila(a posição aparece somente no painel /admin)
+  return `🔄 Encaminhando para um atendente humano. Nosso time responderá em até 24 horas.`;
+}
+
+// é um "apelido", Em vez de o código chamar handoverMsg(...), ele pode chamar PASSO_ATENDENTE
+const PASSO_ATENDENTE = handoverMsg;
+
+//memória que lembra em que ponto da conversa o usuário está.
+const state = new Map();
+
+//------------------------------------------------------------------------------------PAINEL ADMIN STORE (painel /admin)---------------------------------------------------------------------------------
+// Guarda nome do usuário (coletado antes do atendimento humano)
+const userNames = new Map();
+
+// Histórico de mensagens para o painel
+const convoStore = new Map();
+
+// SSE clients para atualização em tempo real (fica atualizando o navegador)
+const sseClients = new Map();
+let sseSeq = 1;
+
+//gera uma data padrão pra "marcar horário"
+function nowISO() { return new Date().toISOString(); }
+
+//Garante que a conversa existe para aquele número
+function getConvo(waId) {
+  if (!convoStore.has(waId)) {
+    convoStore.set(waId, { waId, messages: [], unread: 0, lastMessageAt: null, lastUserMessageAt: null });
+  }
+  return convoStore.get(waId);
+}
+//É o “formato” que o navegador entende no SSE
+function sseSend(res, event, data) {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+//Atualiza o Painel de todos que estão com ele aberto
+function broadcast(event, data) {
+  for (const res of sseClients.values()) {
+    try { sseSend(res, event, data); } catch (e) {}
+  }
+}
+
+//marca a conversa como lida quando assume o atendimento
+function markRead(waId) {
+  const c = getConvo(waId);
+  c.unread = 0;
+  broadcast("conversations", { at: nowISO() });
+  broadcast("conversation", { waId, at: nowISO() });
+}
+
+function logMessage(waId, fromWho, text) {
+  const c = getConvo(waId);
+  const msg = { ts: nowISO(), from: fromWho, text: (text ?? "").toString() };
+  c.messages.push(msg);
+  c.lastMessageAt = msg.ts;
+  if (fromWho === "user") {
+    c.lastUserMessageAt = msg.ts;
+    c.unread = (c.unread || 0) + 1;
+  }
+  broadcast("conversation", { waId, at: nowISO() });
+  broadcast("conversations", { at: nowISO() });
+}
+
 
 //------------------------------------------------------------------------------------FLUXO MENU 3 (DÚVIDA SOBRE HOLERITE) ---------------------------------------------------------------------------------------
 
@@ -313,7 +442,15 @@ function armHoleriteForward(from) {
 
   /*Aqui ele cria o temporizador (setTimeout) que vai rodar depois do tempo definido*/
   sess.forwardTimer = setTimeout(async () => {
-    await sendText(from, "🔄 Encaminhando para um atendente humano. Nosso time responderá em até 24 horas.");
+    const __name = (userNames.get(from) || "").toString().trim();
+    if (!__name) {
+      await sendText(from, "Antes de falar com um atendente, me diga seu nome, por favor 🙂");
+      state.set(from, "await_human_name");
+      return;
+    }
+
+    const __pos = enqueueHandover(from);
+    await sendText(from, handoverMsg(__pos));
     state.set(from, "handover");
     stopInactivity(from); // não encerrar por inatividade durante handover
 
@@ -472,7 +609,9 @@ app.post("/webhook", async (req, res) => {
     const from = msg.from; //from é o número do usuário que enviou a mensagem (exemplo: "5511999999999").
 
     const text = msg.text?.body || msg.interactive?.button_reply?.title || msg.interactive?.list_reply?.title || ""; //Pega o conteúdo da mensagem, considerando vários tipos:
-    const n = normalize(text); //deixa o texto sem espaços e em minúsculas para trabalhar com um padrão
+    const n = normalize(text); 
+    try { logMessage(from, "user", text); } catch (e) {}
+//deixa o texto sem espaços e em minúsculas para trabalhar com um padrão
     const stage = state.get(from) || "idle"; //Pega o estado atual da conversa desse número (guardado no Map state)
 
     // A cada nova mensagem recebida, o bot reinicia o temporizador de inatividade
@@ -491,7 +630,33 @@ app.post("/webhook", async (req, res) => {
       return res.sendStatus(200);
     }
 
-  //------------------------------------------------------------------------------ TRATATIVA DAS OPÇÕES DO MENU PRINCIPAL   -----------------------------------------------------------------------
+  
+
+  //------------------------------------------------------------------------------ COLETA DE NOME PARA ATENDIMENTO HUMANO -----------------------------------------------------------------------
+    if (stage === "await_human_name") {
+      const name = (text || "").toString().trim().replace(/\s+/g, " ");
+      if (name.length < 2) {
+        await sendText(from, "Pode me dizer seu nome, por favor? 🙂");
+        return res.sendStatus(200);
+      }
+      userNames.set(from, name);
+
+      const __pos = enqueueHandover(from);
+    await sendText(from, handoverMsg(__pos));
+      state.set(from, "handover"); // agora está no humano
+      stopInactivity(from); // não encerrar por inatividade durante handover
+
+      try {
+        const position = enqueueHandover(from);
+        await notifyRH({ from, position });
+      } catch (err) {
+        console.error("Falha ao notificar RH:", err?.message || err);
+      }
+
+      return res.sendStatus(200);
+    }
+
+//------------------------------------------------------------------------------ TRATATIVA DAS OPÇÕES DO MENU PRINCIPAL   -----------------------------------------------------------------------
 
     if (stage === "await_main_choice") { //Só entra aqui se o estado atual do usuário for “aguardando escolha do menu principal”.
       if (["1", "2", "3", "4"].includes(n)) { //Garante que a resposta seja uma das opções válidas
@@ -509,7 +674,17 @@ app.post("/webhook", async (req, res) => {
           holeriteSessions.set(from, { hasText: false, hasImage: false, forwardTimer: null });
           state.set(from, "await_holerite_question");
         } else if (n === "4") {
-          await sendText(from, "🔄 Encaminhando para um atendente humano. Nosso time responderá em até 24 horas.");
+          // ✅ Antes de encaminhar para humano, coletar nome (uma vez)
+          const knownName = userNames.get(from);
+          if (!knownName) {
+            await sendText(from, "Antes de falar com um atendente, me diga seu *nome*, por favor 🙂");
+            state.set(from, "await_human_name");
+            return res.sendStatus(200);
+          }
+
+
+          const __pos = enqueueHandover(from);
+    await sendText(from, handoverMsg(__pos));
           state.set(from, "handover"); // agora está no humano
           stopInactivity(from); // não encerrar por inatividade durante handover
 
@@ -578,7 +753,15 @@ app.post("/webhook", async (req, res) => {
 
         // 6 = falar com atendente (handover), sem pergunta de voltar ao menu
         if (n === "6") {
-          await sendText(from, PASSO_ATENDENTE);
+          const __name = (userNames.get(from) || "").toString().trim();
+          if (!__name) {
+            await sendText(from, "Antes de falar com um atendente, me diga seu nome, por favor 🙂");
+            state.set(from, "await_human_name");
+            return res.sendStatus(200);
+          }
+
+          const __pos = enqueueHandover(from);
+          await sendText(from, handoverMsg(__pos));
           state.set(from, "handover");
           stopInactivity(from); // << não encerrar por inatividade durante handover
 
@@ -626,8 +809,16 @@ app.post("/webhook", async (req, res) => {
           return res.sendStatus(200);
         }
         if (n === "7") {
+          const __name = (userNames.get(from) || "").toString().trim();
+          if (!__name) {
+            await sendText(from, "Antes de falar com um atendente, me diga seu nome, por favor 🙂");
+            state.set(from, "await_human_name");
+            return res.sendStatus(200);
+          }
+
           // Muda oara o handover com looping natural
-          await sendText(from, "🔄 Encaminhando para um atendente humano. Nosso time responderá em até 24 horas.");
+          const __pos = enqueueHandover(from);
+    await sendText(from, handoverMsg(__pos));
           state.set(from, "handover");
           stopInactivity(from); // não encerrar por inatividade durante handover
 
@@ -689,6 +880,12 @@ app.post("/webhook", async (req, res) => {
 //------------------------------------------------------------------------------ BOT EM ESTADO HANOVER (DORMINDO)  -----------------------------------------------------------------------
 
     // Se o usuário  manda mensagem estando no estado Hanover o bot oferece algumas opções de saída
+
+    // Se o atendimento humano estiver ativo via painel (/admin), o bot não responde
+    if (stage === "manual") {
+      return res.sendStatus(200);
+    }
+
     if (stage === "handover") {
       await sendText(from, ASK_HANDOVER); // envia  o menu com as duas opções
       state.set(from, "await_handover_choice"); // entra em estado de espera da resposta com a escolha
@@ -706,7 +903,8 @@ app.post("/webhook", async (req, res) => {
 
       } else if (n === "2") {//e se a resposta do usuário for 1
         // o Bot reenvia a mensagem de encaminhameneto 
-        await sendText(from, "🔄 Encaminhando para um atendente humano. Nosso time responderá em até 24 horas.");
+        const __pos = enqueueHandover(from);
+    await sendText(from, handoverMsg(__pos));
         state.set(from, "handover");// e retorna para o estado "Dormindo"
         stopInactivity(from); // mantém regra de não encerrar por inatividade no handover
 
@@ -739,6 +937,24 @@ app.post("/webhook", async (req, res) => {
 
 //------------------------------------------------------------------------------ TESTE DE VERIFICAÇÃO DE CONEXÃO COM O EMAIL  -----------------------------------------------------------------------
 
+
+//------------------------------------------------------------------------------ TESTE DE ENVIO DE MENSAGEM (TEMPLATE)  -----------------------------------------------------------------------
+// Use este endpoint para FAZER A PRIMEIRA MENSAGEM chegar no seu número de teste (inicia a conversa via template).
+// Você pode passar ?to=5511999999999 (somente números) para testar outro destino autorizado.
+app.get("/test-message", async (req, res) => {
+  const raw = (req.query.to || process.env.TEST_NUMBER || "5511959522699").toString();
+  const to = raw.replace(/\D/g, ""); // deixa só dígitos (DDI+DDD+NÚMERO)
+  try {
+    console.log("Enviando TEMPLATE hello_world para:", to);
+    const r = await sendHelloWorldTemplate(to);
+    console.log("✅ WhatsApp API response:", r.data);
+    return res.status(200).send("✅ Mensagem TEMPLATE (hello_world) enviada. Verifique o WhatsApp e os logs.");
+  } catch (e) {
+    console.error("❌ Erro ao enviar TEMPLATE:", e?.response?.data || e.message);
+    return res.status(500).send("❌ Falha ao enviar TEMPLATE. Veja logs do Koyeb.");
+  }
+});
+
 app.get("/test-email", async (req, res) => { //Cria uma rota GET /test-email para disparar um envio de teste via Nodemailer.
   try {
     const info = await mailer.sendMail({//Usa o transporter mailer JA CRIADO para enviar e-mail.
@@ -762,6 +978,359 @@ app.get("/", (req, res) => res.send("Servidor do Bot RH ativo!"));//rota raiz: c
 
 app.get("/healthz", (req, res) => res.status(200).send("ok"));// rota de healthcheck (para serviços de hospedagem monitorarem)
 
+
+
+
+// ========================= PAINEL ADMIN (/admin) =========================
+function toDisplayPhone(waId) {
+  const s = (waId || "").toString().trim();
+  if (s.startsWith("55") && s.length >= 12) {
+    const ddd = s.slice(2,4);
+    const num = s.slice(4);
+    if (num.length === 9) return `+55 ${ddd} ${num.slice(0,5)}-${num.slice(5)}`;
+    if (num.length === 8) return `+55 ${ddd} ${num.slice(0,4)}-${num.slice(4)}`;
+    return `+55 ${ddd} ${num}`;
+  }
+  return s ? `+${s}` : "";
+}
+
+function adminHTML() {
+  return `<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>BOOT RH Kert — Admin</title>
+<style>
+:root{--bg:#0b141a;--panel:#111b21;--panel2:#202c33;--text:#e9edef;--muted:#aebac1;--accent:#00a884;--danger:#ef4444;--warn:#f59e0b;--border:rgba(233,237,239,.10);}
+*{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial;}
+body{margin:0;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;}
+header{padding:12px 16px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;}
+.small{color:var(--muted);font-size:12px;}
+.wrap{flex:1;display:grid;grid-template-columns:340px 1fr;min-height:0;}
+.sidebar{background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0;}
+.search{padding:12px;border-bottom:1px solid var(--border);}
+.search input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--panel2);color:var(--text);outline:none;}
+.list{flex:1;overflow:auto;}
+.item{padding:12px 14px;border-bottom:1px solid var(--border);cursor:pointer;}
+.item:hover{background:rgba(255,255,255,.03);}
+.item.active{background:rgba(0,168,132,.10);}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px;}
+.name{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px;}
+.meta{color:var(--muted);font-size:12px;white-space:nowrap;}
+.pill{font-size:11px;padding:3px 8px;border-radius:999px;border:1px solid var(--border);color:var(--muted);}
+.pill.green{color:var(--accent);border-color:rgba(0,168,132,.35);background:rgba(0,168,132,.08);}
+.pill.yellow{color:var(--warn);border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.08);}
+.unread{min-width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:var(--accent);color:#062f27;font-weight:800;font-size:12px;padding:0 7px;}
+main{display:flex;flex-direction:column;min-height:0;}
+.chatHeader{padding:12px 16px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:12px;}
+.actions{display:flex;gap:8px;flex-wrap:wrap;}
+button{padding:8px 10px;border-radius:10px;border:1px solid var(--border);background:var(--panel2);color:var(--text);cursor:pointer;}
+button.primary{background:rgba(0,168,132,.12);border-color:rgba(0,168,132,.35);}
+button.danger{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.35);}
+.messages{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:10px;}
+.bubble{max-width:min(720px,78%);padding:10px 12px;border-radius:16px;white-space:pre-wrap;word-break:break-word;border:1px solid rgba(255,255,255,.06);}
+.in{align-self:flex-start;background:#202c33;}
+.out{align-self:flex-end;background:#005c4b;}
+.human{align-self:flex-end;background:#1f2937;border-color:rgba(255,255,255,.10);}
+.ts{display:block;margin-top:6px;font-size:11px;color:rgba(233,237,239,.65);}
+.composer{padding:12px 14px;border-top:1px solid var(--border);display:flex;gap:10px;background:var(--panel);}
+.composer textarea{flex:1;resize:none;min-height:42px;max-height:140px;padding:10px 12px;border-radius:12px;border:1px solid var(--border);background:var(--panel2);color:var(--text);outline:none;}
+.empty{padding:24px;color:var(--muted);}
+.tabs{display:flex;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);} .tab{flex:1;background:transparent;border:1px solid var(--border);color:var(--muted);padding:8px 10px;border-radius:10px;cursor:pointer;font-size:12px;} .tab.active{border-color:rgba(0,168,132,.35);color:var(--text);background:rgba(0,168,132,.08);} 
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <div style="font-weight:800;">BOOT RH Kert — Admin</div>
+    <div class="small" id="conn">Conectando…</div>
+  </div>
+  <div class="small">Atualização em tempo real</div>
+</header>
+
+<div class="wrap">
+  <aside class="sidebar">
+    <div class="search"><input id="q" placeholder="Buscar por nome ou número…"/></div>
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="queue">Na fila</button>
+      <button class="tab" data-tab="manual">Em atendimento</button>
+      <button class="tab" data-tab="ended">Encerrados</button>
+    </div>
+    <div class="list" id="list"></div>
+  </aside>
+
+  <main>
+    <div class="chatHeader">
+      <div style="min-width:0;">
+        <div style="font-weight:800;" id="contactName">Selecione uma conversa</div>
+        <div class="small" id="contactSub"></div>
+      </div>
+      <div class="actions" id="actions" style="display:none;">
+        <button class="primary" id="btnAssume">Entrar no atendimento</button>
+        <button class="danger" id="btnEnd">Encerrar atendimento</button>
+</div>
+    </div>
+
+    <div class="messages" id="messages"><div class="empty">Abra uma conversa à esquerda.</div></div>
+
+    <div class="composer" id="composer" style="display:none;">
+      <textarea id="text" placeholder="Mensagem do atendente…"></textarea>
+      <button class="primary" id="btnSend">Enviar</button>
+    </div>
+  </main>
+</div>
+
+<script>
+const $=(id)=>document.getElementById(id);
+let allConvos=[]; let activeId=null; let activeData=null;
+
+function fmtTS(iso){ try{ return new Date(iso).toLocaleString('pt-BR'); }catch(e){ return ''; } }
+function displayName(c){
+  const phone=c.displayPhone||('+'+(c.waId||'')); const nm=(c.name||'').trim();
+  return nm ? (nm+' — '+phone) : phone;
+}
+function statusOf(c){
+  if(c.state==='ended') return {label:'Encerrado', cls:'gray'};
+  if(c.state==='manual') return {label:'Em atendimento', cls:'green'};
+  if(c.inQueue || c.state==='handover') {
+    const pos = Number(c.queuePos||0);
+    return {label:('Na fila ' + (pos?('#'+pos):'')).trim(), cls:'yellow'};
+  }
+  return {label:'Bot ativo', cls:''};
+}
+
+function renderList(){
+  const q=($('q').value||'').toLowerCase().trim();
+  const currentTab=(window.__currentTab||'queue');
+  const filtered=allConvos.filter(c=>{
+    // Pastinhas/abas: Na fila | Em atendimento | Encerrados
+    if(currentTab==='queue'){
+      if(!(c.inQueue || c.state==='handover')) return false;
+    } else if(currentTab==='manual'){
+      if(c.state!=='manual') return false;
+    } else if(currentTab==='ended'){
+      if(c.state!=='ended') return false;
+    }
+    if(!q) return true;
+    return String(c.name||'').toLowerCase().includes(q) || String(c.displayPhone||'').toLowerCase().includes(q) || String(c.waId||'').includes(q);
+  }).sort((a,b)=> String(b.lastMessageAt||'').localeCompare(String(a.lastMessageAt||'')));
+  const list=$('list'); list.innerHTML='';
+  if(!filtered.length){ list.innerHTML='<div class="empty">Sem conversas.</div>'; return; }
+  for(const c of filtered){
+    const st=statusOf(c);
+    const unread=Number(c.unread||0);
+    const div=document.createElement('div');
+    div.className='item'+(c.waId===activeId?' active':'');
+    div.innerHTML=\`
+      <div class="row">
+        <div class="name" title="\${displayName(c)}">\${displayName(c)}</div>
+        \${unread>0?'<span class="unread">'+unread+'</span>':''}
+      </div>
+      <div class="row" style="margin-top:6px;">
+        <div class="meta">\${c.lastUserMessageAt?('Última do usuário: '+fmtTS(c.lastUserMessageAt)):(c.lastMessageAt?('Última: '+fmtTS(c.lastMessageAt)):'')}</div>
+        <span class="pill \${st.cls}">\${st.label}</span>
+      </div>\`;
+    div.onclick=()=>openConversation(c.waId);
+    list.appendChild(div);
+  }
+}
+
+async function fetchConversations(){
+  const r=await fetch('/admin/api/conversations');
+  const data=await r.json();
+  allConvos=data.conversations||[];
+  renderList();
+}
+async function fetchConversation(waId){
+  const r=await fetch('/admin/api/conversation/'+encodeURIComponent(waId));
+  const data=await r.json();
+  return data.conversation;
+}
+function scrollBottom(){ const el=$('messages'); el.scrollTop=el.scrollHeight; }
+
+function renderConversation(conv){
+  activeData=conv;
+  $('messages').innerHTML='';
+  $('contactName').textContent=displayName(conv);
+  $('contactSub').textContent='WaId: '+conv.waId+' • Estado: '+(conv.state||'idle');
+  $('actions').style.display='flex';
+  $('composer').style.display='flex';
+
+  // ✅ botões
+  const st=statusOf(conv);
+  $('btnAssume').style.display = (conv.state==='manual') ? 'none' : (st.label==='Na fila' ? 'inline-flex' : 'none');
+  $('btnEnd').style.display = (conv.state==='manual') ? 'inline-flex' : 'none';
+
+  for(const m of (conv.messages||[])){
+    const b=document.createElement('div');
+    const cls = (m.from==='user')?'in':(m.from==='human'?'human':'out');
+    b.className='bubble '+cls;
+    b.innerHTML=(m.text||'').replace(/</g,'&lt;') + '<span class="ts">'+(m.from==='user'?'Usuário':(m.from==='human'?'Humano':'Bot'))+' • '+fmtTS(m.ts)+'</span>';
+    $('messages').appendChild(b);
+  }
+  // auto-scroll only if user is near bottom
+const el = document.getElementById('messages');
+if (el) {
+  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  if (nearBottom) el.scrollTop = el.scrollHeight;
+}
+  markRead(conv.waId,true).catch(()=>{});
+}
+
+async function openConversation(waId){
+  activeId=waId;
+  const conv=await fetchConversation(waId);
+  renderConversation(conv);
+  renderList();
+}
+
+async function sendMessage(){
+  const t=$('text').value.trim();
+  if(!t || !activeId) return;
+  $('text').value='';
+  await fetch('/admin/api/conversation/'+encodeURIComponent(activeId)+'/message', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})});
+}
+async function assume(){ if(!activeId) return; await fetch('/admin/api/conversation/'+encodeURIComponent(activeId)+'/assume',{method:'POST'}); }
+async function end(){ if(!activeId) return; await fetch('/admin/api/conversation/'+encodeURIComponent(activeId)+'/end',{method:'POST'}); }
+async function markRead(waId,silent){ if(!waId) return; await fetch('/admin/api/conversation/'+encodeURIComponent(waId)+'/mark-read',{method:'POST'}); if(!silent) await fetchConversations(); }
+
+$('btnSend').onclick=sendMessage;
+$('btnAssume').onclick=assume;
+$('btnEnd').onclick=end;
+const _textEl = $('text'); if (_textEl) _textEl.addEventListener('keydown',(e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendMessage(); }});
+const _qEl = $('q'); if (_qEl) _qEl.addEventListener('input', ()=>renderList());
+const _tabs = $('tabs');
+if(_tabs){
+  window.__currentTab = window.__currentTab || 'queue';
+  _tabs.querySelectorAll('.tab').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      _tabs.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      window.__currentTab = btn.dataset.tab;
+      renderList();
+    });
+  });
+}
+
+const es=new EventSource('/admin/events');
+es.onopen=()=> $('conn').textContent='Online';
+es.onerror=()=> $('conn').textContent='Reconectando…';
+es.addEventListener('conversations', ()=>fetchConversations().catch(()=>{}));
+es.addEventListener('conversation', async (ev)=>{
+  try{
+    const p=JSON.parse(ev.data||'{}');
+    if(activeId && p.waId===activeId){
+      const conv=await fetchConversation(activeId);
+      renderConversation(conv);
+    }else{
+      await fetchConversations();
+    }
+  }catch(e){}
+});
+
+fetchConversations().catch(()=>{});
+</script>
+</body></html>`;
+}
+
+app.get("/admin", (req, res) => res.status(200).send(adminHTML()));
+
+app.get("/admin/events", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  const id = String(sseSeq++);
+  sseClients.set(id, res);
+  try { sseSend(res, "hello", { ok: true, at: nowISO() }); } catch (e) {}
+
+  req.on("close", () => { sseClients.delete(id); });
+});
+
+app.get("/admin/api/conversations", (req, res) => {
+  const conversations = [];
+  for (const [waId, convo] of convoStore.entries()) {
+    const name = userNames.get(waId) || "";
+    conversations.push({
+      waId,
+      name,
+      displayPhone: toDisplayPhone(waId),
+      state: state.get(waId) || "idle",
+      inQueue: inQueue.has(waId),
+      queuePos: inQueue.has(waId) ? (handoverQueue.findIndex((x)=>x.from===waId)+1) : 0,
+      unread: convo.unread || 0,
+      lastMessageAt: convo.lastMessageAt,
+      lastUserMessageAt: convo.lastUserMessageAt,
+    });
+  }
+  res.json({ conversations });
+});
+
+app.get("/admin/api/conversation/:waId", (req, res) => {
+  const waId = (req.params.waId || "").toString().trim();
+  const convo = getConvo(waId);
+  const name = userNames.get(waId) || "";
+  res.json({
+    conversation: {
+      waId,
+      name,
+      displayPhone: toDisplayPhone(waId),
+      state: state.get(waId) || "idle",
+      inQueue: inQueue.has(waId),
+      queuePos: inQueue.has(waId) ? (handoverQueue.findIndex((x)=>x.from===waId)+1) : 0,
+      unread: convo.unread || 0,
+      lastMessageAt: convo.lastMessageAt,
+      lastUserMessageAt: convo.lastUserMessageAt,
+      messages: (convo.messages || []).slice(-500),
+    }
+  });
+});
+
+app.post("/admin/api/conversation/:waId/mark-read", (req, res) => {
+  const waId = (req.params.waId || "").toString().trim();
+  markRead(waId);
+  res.json({ ok: true });
+});
+
+app.post("/admin/api/conversation/:waId/assume", async (req, res) => {
+  const waId = (req.params.waId || "").toString().trim();
+  removeFromQueue(waId);
+  state.set(waId, "manual");
+  stopInactivity(waId);
+  markRead(waId);
+  const nm = userNames.get(waId);
+  await sendHumanText(waId, `✅ Atendimento iniciado${nm ? `, ${nm}` : ""}. Pode me explicar sua dúvida?`);
+  res.json({ ok: true });
+});
+
+app.post("/admin/api/conversation/:waId/end", async (req, res) => {
+  const waId = (req.params.waId || "").toString().trim();
+  removeFromQueue(waId);
+  state.set(waId, "ended");
+  markRead(waId);
+  await sendHumanText(waId, THANKS);
+  res.json({ ok: true });
+});
+
+app.post("/admin/api/conversation/:waId/message", async (req, res) => {
+  const waId = (req.params.waId || "").toString().trim();
+  const text = (req.body?.text || "").toString().trim();
+  if (!text) return res.status(400).json({ error: "empty_text" });
+
+  if ((state.get(waId) || "") !== "manual") {
+    removeFromQueue(waId);
+    state.set(waId, "manual");
+    stopInactivity(waId);
+  }
+
+  markRead(waId);
+  await sendHumanText(waId, text);
+  res.json({ ok: true });
+});
+
+// ========================= FIM PAINEL ADMIN =========================
 
 app.listen(PORT, () => { //inicialização do boot no servidor
   //logs de depuração
